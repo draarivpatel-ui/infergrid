@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InferGrid | Open weight LLM capacity planner and GPU routing workbench</title>
+<meta name="description" content="InferGrid is an open source, offline first planner for open weight LLM serving. Exact KV cache and weight memory, roofline TTFT and inter token latency, a Pareto request router and vLLM manifests for H100, H200, L40S and A100 clusters.">
+<meta name="theme-color" content="#F6F4EE">
+<link rel="canonical" href="https://aariv.me/infergrid/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="InferGrid">
+<meta property="og:title" content="InferGrid | Know where your VRAM goes">
+<meta property="og:description" content="An open source capacity planner, KV cache calculator and multi GPU routing workbench for open weight LLMs on NVIDIA clusters. Works offline with no key.">
+<meta property="og:url" content="https://aariv.me/infergrid/">
+<meta property="og:image" content="https://aariv.me/infergrid/img/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="InferGrid memory allocation diagram showing weights, KV cache and free HBM per GPU.">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="InferGrid | Know where your VRAM goes">
+<meta name="twitter:description" content="Exact KV cache math, roofline latency, a Pareto router and vLLM manifests for open weight models on NVIDIA GPUs.">
+<meta name="twitter:image" content="https://aariv.me/infergrid/img/og.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23141615'/%3E%3Crect x='6' y='6' width='9' height='9' fill='%2310B981'/%3E%3Crect x='17' y='6' width='9' height='9' fill='%230F766E'/%3E%3Crect x='6' y='17' width='9' height='9' fill='%230F766E'/%3E%3Crect x='17' y='17' width='9' height='9' fill='%23D97706'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip-link" href="#workbench">Skip to the workbench</a>
+
+<header class="site-header" id="top">
+  <div class="wrap bar">
+    <a class="brand" href="#top" aria-label="InferGrid, back to top">
+      <svg class="brand-mark" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false"><rect class="bm-a" x="4" y="4" width="11" height="11"/><rect class="bm-b" x="17" y="4" width="11" height="11"/><rect class="bm-b" x="4" y="17" width="11" height="11"/><rect class="bm-c" x="17" y="17" width="11" height="11"/></svg>
+      <span class="brand-name">InferGrid</span>
+    </a>
+    <nav aria-label="Sections">
+      <ul class="nav-list">
+        <li><a href="#workbench">Workbench</a></li>
+        <li><a href="#router">Router</a></li>
+        <li><a href="#export">Export</a></li>
+        <li><a href="#probe">Probe</a></li>
+        <li><a href="#method">Method</a></li>
+      </ul>
+    </nav>
+    <a class="btn btn-quiet nav-cta" href="https://github.com/draarivpatel-ui/infergrid">
+      <svg class="icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false"><path d="M7 5L2.5 10 7 15M13 5l4.5 5L13 15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Source
+    </a>
+  </div>
+</header>
+
+<main>
+<section class="hero wrap" aria-labelledby="hero-title">
+  <div class="hero-copy">
+    <h1 id="hero-title">Know where your VRAM goes.</h1>
+    <p class="lede">InferGrid plans open weight LLM serving on NVIDIA GPUs. Move a slider and watch weights, KV cache and free HBM re-flow on every card, with time to first token and inter token latency from the roofline.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#workbench">Open the workbench</a>
+      <a class="btn btn-quiet" href="#method">Read the physics</a>
+    </div>
+    <p class="fine hero-fine">Runs entirely in your browser with no key and no server. Every number comes from a datasheet or a published model config, and the arithmetic is shown.</p>
+  </div>
+  <figure class="hero-card" id="hero-figure">
+    <div id="hero-hbm" aria-live="polite"></div>
+    <div class="ruler" aria-hidden="true"></div>
+    <figcaption id="hero-caption" class="fine">Loading the first scenario.</figcaption>
+  </figure>
+</section>
+
+<noscript>
+  <section class="wrap noscript-box" aria-labelledby="ns-title">
+    <h2 id="ns-title">JavaScript is needed for the workbench</h2>
+    <p>InferGrid is a static page. The planner, router and exporter run in your browser with no server, so they need JavaScript. Without it you can still read the method, or clone the repository and run the same engine in Node with <code>node --test tests/</code>.</p>
+    <p>For a sense of the math, Llama-3.1-70B stores 2 x 80 layers x 8 KV heads x 128 head dim x 2 bytes, which is 327,680 bytes of KV cache for every token in FP16.</p>
+  </section>
+</noscript>
+
+<section class="workbench wrap" id="workbench" aria-labelledby="wb-title">
+  <div class="section-head">
+    <h2 id="wb-title">Capacity workbench</h2>
+    <p>Pick a model, a GPU layout and a load. The diagram, the verdict and both charts update as you move any control.</p>
+  </div>
+
+  <div class="preset-block">
+    <h3 id="preset-label" class="small-title">Workload presets</h3>
+    <div id="preset-row" class="preset-row" role="group" aria-labelledby="preset-label"></div>
+    <p id="preset-blurb" class="fine" aria-live="polite"></p>
+  </div>
+
+  <div class="wb-grid">
+    <form id="scenario" class="panel controls" autocomplete="off" aria-label="Scenario controls" onsubmit="return false">
+      <h3 class="small-title">Scenario</h3>
+      <div class="field">
+        <label for="f-model">Model</label>
+        <select id="f-model"></select>
+      </div>
+      <div class="field">
+        <label for="f-gpu">GPU</label>
+        <select id="f-gpu"></select>
+      </div>
+      <div class="field-pair">
+        <div class="field">
+          <label for="f-tp">Tensor parallel</label>
+          <select id="f-tp"></select>
+        </div>
+        <div class="field">
+          <label for="f-pp">Pipeline parallel</label>
+          <select id="f-pp"></select>
+        </div>
+      </div>
+      <div class="field-pair">
+        <div class="field">
+          <label for="f-wprec">Weight precision</label>
+          <select id="f-wprec"></select>
+        </div>
+        <div class="field">
+          <label for="f-kvprec">KV cache precision</label>
+          <select id="f-kvprec"></select>
+        </div>
+      </div>
+      <div class="field">
+        <div class="field-line"><label for="f-prompt">Prompt tokens</label><output id="o-prompt" for="f-prompt" class="num"></output></div>
+        <input type="range" id="f-prompt" min="0" max="1000" step="1">
+      </div>
+      <div class="field">
+        <div class="field-line"><label for="f-output">Output tokens</label><output id="o-output" for="f-output" class="num"></output></div>
+        <input type="range" id="f-output" min="0" max="1000" step="1">
+      </div>
+      <div class="field">
+        <div class="field-line"><label for="f-conc">Concurrent sequences</label><output id="o-conc" for="f-conc" class="num"></output></div>
+        <input type="range" id="f-conc" min="1" max="512" step="1">
+      </div>
+      <div class="field">
+        <div class="field-line"><label for="f-util">GPU memory utilization</label><output id="o-util" for="f-util" class="num"></output></div>
+        <input type="range" id="f-util" min="50" max="98" step="1">
+      </div>
+      <details class="advanced">
+        <summary>Engine settings and calibration</summary>
+        <div class="field-pair">
+          <div class="field">
+            <label for="f-maxseqs">Max num seqs</label>
+            <input type="number" id="f-maxseqs" min="1" max="2048" step="1">
+          </div>
+          <div class="field">
+            <label for="f-maxbt">Max batched tokens</label>
+            <input type="number" id="f-maxbt" min="256" max="131072" step="256">
+          </div>
+        </div>
+        <div class="field">
+          <div class="field-line"><label for="f-effmem">Memory bandwidth efficiency</label><output id="o-effmem" for="f-effmem" class="num"></output></div>
+          <input type="range" id="f-effmem" min="40" max="100" step="1">
+        </div>
+        <div class="field">
+          <div class="field-line"><label for="f-effcomp">Tensor Core efficiency</label><output id="o-effcomp" for="f-effcomp" class="num"></output></div>
+          <input type="range" id="f-effcomp" min="20" max="100" step="1">
+        </div>
+        <p class="fine">Efficiency scales the datasheet peaks to what kernels usually reach. The defaults are assumptions. Fit them to a real endpoint with the probe.</p>
+      </details>
+    </form>
+
+    <div class="results">
+      <div id="wb-verdict" class="panel verdict-panel" role="status" aria-live="polite" aria-atomic="true"></div>
+
+      <div class="panel">
+        <h3 class="panel-title">Memory per GPU</h3>
+        <div class="memory-layout">
+          <div id="wb-memory" class="chart-box"></div>
+          <div id="wb-legend"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 class="panel-title">Roofline</h3>
+        <p class="fine">Hover the chart to read the ceiling at any arithmetic intensity. Dots show where prefill and decode land after communication and launch overhead.</p>
+        <div id="wb-roofline" class="chart-box"></div>
+        <p id="rf-note" class="fine"></p>
+      </div>
+
+      <div class="panel">
+        <h3 class="panel-title">First token latency against burst size</h3>
+        <p class="fine">Same model and layout on four GPUs. Dashed lines mark a GPU where the layout does not fit in memory. H100 and H200 share Tensor Core rates, so compute bound prefill is identical on both, and H200 pulls ahead only when decode or KV cache is the limit.</p>
+        <div id="wb-ttft" class="chart-box"></div>
+        <div class="field inspect">
+          <div class="field-line"><label for="f-ttft-inspect">Inspect burst size</label><output id="o-ttft-inspect" for="f-ttft-inspect" class="num"></output></div>
+          <input type="range" id="f-ttft-inspect" min="0" max="6" step="1" value="3">
+        </div>
+        <div id="wb-ttft-readout" class="table-scroll" aria-live="polite"></div>
+      </div>
+
+      <div class="panel">
+        <h3 class="panel-title">All numbers</h3>
+        <div id="wb-numbers" class="table-scroll"></div>
+        <details class="advanced steps-box">
+          <summary>Show the arithmetic</summary>
+          <div id="wb-steps"></div>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="router wrap" id="router" aria-labelledby="rt-title">
+  <div class="section-head">
+    <h2 id="rt-title">Route a workload across pools</h2>
+    <p>The router places each request on the cheapest replica that meets its latency targets, has enough KV blocks and is capable enough for the task. The same requests are then replayed through three simpler policies.</p>
+  </div>
+
+  <div class="panel">
+    <h3 class="panel-title">Cluster pools</h3>
+    <div id="r-pools" class="table-scroll" tabindex="0" role="region" aria-label="Cluster pool editor"></div>
+    <p class="fine">Rates default to Nebius list prices read on 2026-10-25 (H100 $4.50, H200 $5.40, L40S from $1.55 per GPU hour). Nebius does not list A100, so that rate is yours to enter. Check current prices before budgeting.</p>
+  </div>
+
+  <div class="panel">
+    <h3 class="panel-title">Workload</h3>
+    <div class="field-row">
+      <div class="field">
+        <label for="r-count">Requests</label>
+        <input type="number" id="r-count" min="10" max="300" step="10">
+      </div>
+      <div class="field">
+        <label for="r-seed">Seed</label>
+        <input type="number" id="r-seed" min="1" max="999999" step="1">
+      </div>
+      <div class="field">
+        <label for="r-slo-ttft">TTFT target (ms)</label>
+        <input type="number" id="r-slo-ttft" min="50" max="120000" step="50">
+      </div>
+      <div class="field">
+        <label for="r-slo-itl">Inter token target (ms)</label>
+        <input type="number" id="r-slo-itl" min="5" max="1000" step="5">
+      </div>
+      <button type="button" class="btn btn-quiet" id="r-reset">Reset cluster</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3 class="panel-title">Result</h3>
+    <div id="r-summary" role="status" aria-live="polite"></div>
+    <div id="r-policies" class="table-scroll" tabindex="0" role="region" aria-label="Policy comparison"></div>
+  </div>
+
+  <div class="panel">
+    <h3 class="panel-title">Pool load</h3>
+    <div id="r-load"></div>
+  </div>
+
+  <div class="panel">
+    <h3 class="panel-title">Every decision</h3>
+    <div id="r-table"></div>
+  </div>
+</section>
+
+<section class="export wrap" id="export" aria-labelledby="ex-title">
+  <div class="section-head">
+    <h2 id="ex-title">Deployment drawer</h2>
+    <p>Copy launch files built from the same engine. Parallelism, memory utilization, max length, max sequences and quantization flags come straight from the layout above.</p>
+  </div>
+  <div class="panel">
+    <div class="field-row">
+      <div class="field">
+        <label for="ex-source">Export source</label>
+        <select id="ex-source">
+          <option value="cluster">Router cluster pools</option>
+          <option value="scenario">Workbench scenario as one pool</option>
+        </select>
+      </div>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Export format" id="ex-tabs">
+      <button type="button" role="tab" id="tab-compose" aria-controls="ex-panel" aria-selected="true" tabindex="0" data-tab="compose">docker-compose.yml</button>
+      <button type="button" role="tab" id="tab-serve" aria-controls="ex-panel" aria-selected="false" tabindex="-1" data-tab="serve">serve.sh</button>
+      <button type="button" role="tab" id="tab-trtllm" aria-controls="ex-panel" aria-selected="false" tabindex="-1" data-tab="trtllm">TensorRT-LLM</button>
+      <button type="button" role="tab" id="tab-router" aria-controls="ex-panel" aria-selected="false" tabindex="-1" data-tab="router">router-policy.json</button>
+    </div>
+    <div id="ex-panel" role="tabpanel" aria-labelledby="tab-compose" class="code-panel">
+      <div class="code-actions">
+        <button type="button" class="btn btn-primary btn-small" id="ex-copy">Copy</button>
+        <button type="button" class="btn btn-quiet btn-small" id="ex-download">Download</button>
+        <span id="ex-status" class="fine" role="status" aria-live="polite"></span>
+      </div>
+      <pre class="code" tabindex="0" aria-label="Generated file"><code id="ex-code"></code></pre>
+    </div>
+    <ul id="ex-warnings" class="notes"></ul>
+  </div>
+</section>
+
+<section class="probe wrap" id="probe" aria-labelledby="pr-title">
+  <div class="section-head">
+    <h2 id="pr-title">Endpoint probe</h2>
+    <p>Optional. Point InferGrid at a Nebius AI Studio key or a local vLLM server and compare a streamed completion with the roofline for the scenario above. Offline replay needs nothing.</p>
+  </div>
+  <div class="panel">
+    <form id="probe-form" class="probe-form" autocomplete="off" onsubmit="return false">
+      <div class="field wide">
+        <label for="pr-url">Base URL</label>
+        <input type="url" id="pr-url" list="pr-urls" value="https://api.studio.nebius.ai/v1" spellcheck="false">
+        <datalist id="pr-urls">
+          <option value="https://api.studio.nebius.ai/v1"></option>
+          <option value="https://api.tokenfactory.nebius.com/v1"></option>
+          <option value="http://localhost:8000/v1"></option>
+        </datalist>
+      </div>
+      <div class="field wide">
+        <label for="pr-key">API key</label>
+        <input type="password" id="pr-key" autocomplete="off" spellcheck="false" placeholder="Leave empty for a local server">
+        <span class="fine">Held in this tab only and sent only to the base URL above. It is never stored, logged or placed in a link.</span>
+      </div>
+      <div class="field wide">
+        <label for="pr-model">Model id</label>
+        <input type="text" id="pr-model" list="pr-models" spellcheck="false" placeholder="Press List models, or type an id">
+        <datalist id="pr-models"></datalist>
+      </div>
+      <div class="field">
+        <label for="pr-prompt">Prompt tokens, approximate</label>
+        <input type="number" id="pr-prompt" min="16" max="8192" step="16" value="256">
+      </div>
+      <div class="field">
+        <label for="pr-max">Output tokens</label>
+        <input type="number" id="pr-max" min="8" max="512" step="8" value="64">
+      </div>
+      <div class="probe-actions">
+        <button type="button" class="btn btn-quiet" id="pr-list">List models</button>
+        <button type="button" class="btn btn-primary" id="pr-run">Run live probe</button>
+        <button type="button" class="btn btn-quiet" id="pr-replay">Run offline replay</button>
+      </div>
+    </form>
+    <p id="pr-status" class="fine" role="status" aria-live="polite"></p>
+    <div id="pr-result" class="table-scroll" aria-live="polite"></div>
+    <p class="fine">Browsers call the endpoint directly, so it must allow cross origin requests. Nebius answered a keyless preflight from another origin with an open allow-origin header on 2026-10-25, and vLLM allows all origins by default. Some browsers block plain http endpoints from an https page.</p>
+  </div>
+</section>
+
+<section class="method wrap" id="method" aria-labelledby="mt-title">
+  <div class="section-head">
+    <h2 id="mt-title">How the numbers are made</h2>
+    <p>Everything on this page is an analytical model. Nothing here was measured on a cluster, and no benchmark result is claimed. The model uses published datasheet bandwidth and FLOPS, published model configs, and a few labelled assumptions.</p>
+  </div>
+
+  <div class="method-grid">
+    <article class="panel">
+      <h3 class="panel-title">Memory</h3>
+      <pre class="code small" tabindex="0"><code>KV bytes per token = 2 x L x n_kv x d_head x bytes
+per GPU = 2 x ceil(L / PP) x ceil(n_kv / TP) x d_head x bytes
+weights = non-embedding params x bytes + embeddings x 2
+budget = HBM x gpu-memory-utilization
+KV pool = budget - weights/(TP x PP) - activations - runtime
+sequences = floor(pool blocks / blocks per sequence)</code></pre>
+      <p>Embeddings and the output head stay at 16 bit when the rest is quantized. Blocks are 16 tokens, as in vLLM. Parameter counts are derived from layers, hidden size, heads and FFN width, then checked against the published totals in the test suite.</p>
+    </article>
+    <article class="panel">
+      <h3 class="panel-title">Latency</h3>
+      <pre class="code small" tabindex="0"><code>decode  = max(bytes / (BW x eff), FLOPs / (peak x eff))
+          + 2 x L x all-reduce + launch overhead
+prefill = max(weight reads + KV writes, 2 x params x tokens
+          + 2 x L x n_q x d_head x prompt^2) + the same overheads
+all-reduce = latency + 2 (TP - 1) / TP x bytes / link</code></pre>
+      <p>Decode reads every weight once per step, so it is bandwidth bound until the batch is large. Prefill is compute bound. L40S has no NVLink, so tensor parallel pays PCIe all-reduce costs. A100 has no FP8 Tensor Cores, so FP8 only saves memory there.</p>
+    </article>
+  </div>
+
+  <div class="panel">
+    <h3 class="panel-title">GPU specifications</h3>
+    <div id="m-hw" class="table-scroll" tabindex="0" role="region" aria-label="GPU specifications"></div>
+    <p class="fine">Throughput is dense Tensor Core throughput. NVIDIA prints a second, doubled figure with structured sparsity, which this engine ignores. Sources are the NVIDIA datacenter pages for <a href="https://www.nvidia.com/en-us/data-center/h200/">H200</a>, <a href="https://www.nvidia.com/en-us/data-center/l40s/">L40S</a> and <a href="https://www.nvidia.com/en-us/data-center/a100/">A100</a>, and the H100 datasheet, which shares the Hopper Tensor Core rates.</p>
+  </div>
+
+  <div class="panel">
+    <h3 class="panel-title">Model architectures</h3>
+    <div id="m-models"></div>
+    <p class="fine">Shapes come from each model's <code>config.json</code> on Hugging Face (ungated mirrors where the original is gated) and, for Nemotron-4-340B, Table 1 of the <a href="https://arxiv.org/abs/2406.11704">technical report</a>.</p>
+  </div>
+
+  <div class="panel">
+    <h3 class="panel-title">What it does not model</h3>
+    <ul class="plain-list">
+      <li>Mixture of experts routing, speculative decoding, prefix caching and disaggregated prefill.</li>
+      <li>Gemma-2 sliding window layers, which would reduce KV below what is shown.</li>
+      <li>Allocator fragmentation, CUDA graph capture sizes beyond a flat estimate, and NCCL topology effects beyond a single latency and bandwidth per link.</li>
+      <li>Queueing in the workbench. The router adds a simple per replica prefill queue and a batch snapshot at admission.</li>
+      <li>Task quality. The router capability score is a size proxy (log of parameter count, 400B equals 1.0). Replace it with your own eval results.</li>
+    </ul>
+  </div>
+</section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap foot">
+    <p><strong>InferGrid</strong> is MIT licensed and built by Aariv Patel for the Nebius x NVIDIA Global AI Hackathon.</p>
+    <p><a href="https://github.com/draarivpatel-ui/infergrid">Source on GitHub</a></p>
+  </div>
+</footer>
+
+<script src="js/engine.js"></script>
+<script src="js/render.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
