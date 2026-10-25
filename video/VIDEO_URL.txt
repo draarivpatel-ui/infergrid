@@ -1,0 +1,2 @@
+https://youtu.be/cxLIqeHPDSA
+InferGrid, an open weight LLM capacity planner and GPU routing workbench

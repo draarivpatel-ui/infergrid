@@ -81,3 +81,5 @@ way it should be said.
 ```
 Your model does not fit, and you find out at launch. InferGrid shows where every gigabyte goes. Slide the context length and weights, cache and free memory move on every GPU. It computes latency, routes requests to the cheapest pool that meets your targets, and exports vee L L M files. Open source, no key.
 ```
+
+Video: https://youtu.be/cxLIqeHPDSA
