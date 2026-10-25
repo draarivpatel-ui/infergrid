@@ -43,7 +43,7 @@ as bandwidth efficiency are exposed as controls and listed in the method section
 
 Vanilla JavaScript with no dependencies and no build step. One engine file runs in the browser and
 in Node, a separate pure renderer produces the HTML and SVG, and a thin controller wires the
-controls. The test suite has 147 tests across the engine and the page, including hand derived
+controls. The test suite has 184 tests across the engine and the page, including hand derived
 golden values for KV bytes, activation estimates, decode and prefill latency, router decisions,
 exported flags and probe parsing. Design follows an alabaster paper and carbon ink palette with a
 single teal signal color, Space Grotesk, Plus Jakarta Sans and JetBrains Mono.

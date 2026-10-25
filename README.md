@@ -43,7 +43,7 @@ published total within one percent.
 ## Quick start
 
 ```
-npm test                      # 147 tests, no install needed
+npm test                      # 184 tests, no install needed
 python3 -m http.server 8000   # then open http://localhost:8000/
 ```
 

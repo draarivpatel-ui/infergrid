@@ -7,6 +7,7 @@ const E = require('../js/engine.js');
 const R = require('../js/render.js');
 const App = require('../js/app.js');
 
+function near(a, b, tol) { assert.ok(Math.abs(a - b) <= tol, a + ' vs ' + b); }
 const ROOT = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const css = fs.readFileSync(path.join(ROOT, 'styles.css'), 'utf8');
@@ -518,4 +519,240 @@ test('changing an unrelated control does not round the preset prompt length', ()
   doc.els['f-prompt'].value = '0';
   doc.els['f-prompt'].fire('input');
   assert.equal(app.state.scenario.promptTokens, 128);
+});
+
+/* ---------- gap closers found by mutation testing ---------- */
+
+test('millisecond formatting switches units at the documented thresholds', () => {
+  assert.equal(R.msStr(5.55), '5.6 ms');
+  assert.equal(R.msStr(99.9), '99.9 ms');
+  assert.equal(R.msStr(100), '100 ms');
+  assert.equal(R.msStr(9999), '9,999 ms');
+  assert.equal(R.msStr(10000), '10.0 s');
+  assert.equal(R.msStr(NaN), 'n/a');
+});
+
+test('legend swatches, icons and table dots are all hidden from assistive technology', () => {
+  const fp = E.computeModelFootprint(Object.assign({}, SCN, { concurrentSeqs: 5000 }));
+  const lg = R.renderMemoryLegend(fp);
+  assert.equal((lg.match(/class="swatch /g) || []).length, (lg.match(/class="swatch [^"]*" aria-hidden="true"/g) || []).length);
+  assert.ok((lg.match(/class="swatch /g) || []).length >= 7);
+  Object.keys(R.ICONS).forEach((k) => assert.match(R.ICONS[k], /focusable="false"/));
+  const series = E.ttftVsBatch(SCN, ['h100', 'h200'], R.BATCHES);
+  assert.match(R.renderTtftReadout(series, 0), /class="swatch-dot tt-fill-h100" aria-hidden="true"/);
+});
+
+test('the pool editor ties every control to a label and honors the enabled flag', () => {
+  const pools = E.REFERENCE_CLUSTER.map((p) => Object.assign({}, p, { enabled: true, costPerGpuHour: 2 }));
+  pools[1].enabled = false;
+  const out = R.renderPoolEditor(pools);
+  const ids = [...out.matchAll(/<(?:input|select)[^>]*\sid="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(ids.length, 4 * 7);
+  ids.forEach((id) => assert.ok(out.includes('for="' + id + '"'), id));
+  assert.match(out, /id="pool-0-on" checked/);
+  assert.ok(!/id="pool-1-on" checked/.test(out));
+});
+
+test('only the Pareto row of the policy table is emphasised', () => {
+  const cmp = E.compareRoutingPolicies(E.generateWorkload('saas-burst', { count: 30 }), E.REFERENCE_CLUSTER);
+  const t = R.renderPolicyTable(cmp);
+  assert.equal((t.match(/row-strong/g) || []).length, 1);
+  assert.match(t, /<tr class="row-strong"><th scope="row">Pareto router/);
+});
+
+test('decision rows show the right wording and class for each outcome', () => {
+  const result = { decisions: [
+    { requestId: 'a', inputTokens: 1, outputTokens: 1, complexity: 0.1, poolId: 'p', replica: 0, ttftMs: 5, itlMs: 5, status: 'routed', reason: '' },
+    { requestId: 'b', inputTokens: 1, outputTokens: 1, complexity: 0.1, poolId: 'p', replica: 1, ttftMs: 5, itlMs: 5, status: 'slo_violated', reason: 'ttft_slo' },
+    { requestId: 'c', inputTokens: 1, outputTokens: 1, complexity: 0.1, poolId: null, replica: null, ttftMs: 0, itlMs: 0, status: 'rejected', reason: 'kv_oom' }
+  ] };
+  const t = R.renderDecisionTable(result, 10);
+  assert.match(t, /<td class="">Meets targets/);
+  assert.match(t, /<td class="warn-text">Misses the TTFT target/);
+  assert.match(t, /<td class="bad-text">No replica had KV blocks free/);
+  assert.match(t, /p r1/);
+  assert.match(t, /none<\/td><td class="r num">n\/a/);
+  assert.equal((R.renderDecisionTable(result, 2).match(/<tr><th scope="row">/g) || []).length, 2);
+});
+
+test('pool load shows a meter, flags overload and explains unusable pools', () => {
+  const result = {
+    pools: [{ id: 'a', usable: true, replicas: 1 }, { id: 'b', usable: true, replicas: 2 }, { id: 'c', usable: false, unusableReason: 'Weights too big.' }],
+    summary: { perPool: [
+      { id: 'a', label: 'A', requests: 3, peakKvUtilization: 0.5 },
+      { id: 'b', label: 'B', requests: 9, peakKvUtilization: 1.2 },
+      { id: 'c', label: 'C', requests: 0, peakKvUtilization: 0 }
+    ] }
+  };
+  const t = R.renderPoolLoad(result);
+  assert.match(t, /role="img" aria-label="Peak KV use 50%"/);
+  assert.match(t, /1 replica<|1 replica$/m);
+  assert.match(t, /2 replicas/);
+  assert.equal((t.match(/is-over/g) || []).length, 1);
+  assert.match(t, /width:50\.0%/);
+  assert.match(t, /width:100\.0%/);
+  assert.match(t, /not deployable\. Weights too big\./);
+});
+
+test('probe footnote names the basis of the inter token figure', () => {
+  const m = E.computeRooflineMetrics(Object.assign({}, SCN, { concurrentSeqs: 1 }));
+  const a = { ok: true, ttftMs: 1, itlMs: 2, chunks: 5, completionTokens: 6, itlBasis: 'usage', tokensPerSec: 500, promptTokens: 9 };
+  assert.match(R.renderProbeResult(a, E.compareProbeToRoofline(a, m), 'live'), /uses the reported token count/);
+  const b = Object.assign({}, a, { itlBasis: 'chunks', completionTokens: null, promptTokens: null });
+  const out = R.renderProbeResult(b, E.compareProbeToRoofline(Object.assign({}, b, { promptTokens: 100 }), m), 'live');
+  assert.match(out, /uses chunk spacing/);
+  assert.ok(!/prompt tokens reported/.test(out));
+});
+
+test('hardware table describes links and missing FP8 correctly', () => {
+  const t = R.renderHardwareTable();
+  assert.match(t, /L40S 48GB<\/th>[^]*?PCIe Gen4 x16, 32 GB\/s per direction, no NVLink/);
+  assert.match(t, /A100 SXM4 80GB<\/th>[^]*?none<\/td><td>NVLink, 300 GB\/s per direction/);
+  assert.match(t, /H100 SXM5 80GB<\/th><td class="r num">80 GiB HBM3/);
+});
+
+test('roofline marks only the selected GPU as active, stacks equal peak labels and anchors dot labels', () => {
+  const m = E.computeRooflineMetrics(SCN);
+  const svg = R.renderRoofline(m, null);
+  assert.equal((svg.match(/rf-curve rf-[a-z0-9]+ is-active/g) || []).length, 1);
+  assert.match(svg, /rf-curve rf-h100 is-active/);
+  const yOf = (g) => Number(svg.match(new RegExp('rf-text-' + g + '[^>]*? y="([0-9.]+)"'))[1]);
+  near(Math.abs(yOf('h100') - yOf('h200')), 13, 1e-6);
+  assert.match(svg, /text-anchor="end">Prefill, 4,000 tokens/);
+  assert.match(svg, /text-anchor="start">Decode, 1 sequence/);
+  const left = R.renderRoofline(m, 1);
+  const right = R.renderRoofline(m, 5000);
+  assert.match(left, /class="cross-text"[^>]*text-anchor="start"/);
+  assert.match(right, /class="cross-text"[^>]*text-anchor="end"/);
+});
+
+test('TTFT chart highlights the selected burst and keeps end labels apart', () => {
+  const series = E.ttftVsBatch(SCN, ['h100', 'h200', 'l40s', 'a100'], R.BATCHES);
+  const svg = R.renderTtftChart(series, 2, 0);
+  assert.equal((svg.match(/r="5"/g) || []).length, 4);
+  const ys = ['h100', 'h200', 'l40s', 'a100'].map((g) => Number(svg.match(new RegExp('tt-text-' + g + '" x="[0-9.]+" y="([0-9.]+)"'))[1])).sort((a, b) => a - b);
+  for (let i = 1; i < ys.length; i++) assert.ok(ys[i] - ys[i - 1] >= 14 - 1e-9);
+  const x = (i) => 62 + (i / 6) * (620 - 62 - 70);
+  [0, 1, 3, 5, 6].forEach((i) => assert.equal(R.ttftIndexFromX(x(i)), i));
+  assert.match(svg, /class="tt-label tt-text-h100" x="558\.0"/);
+});
+
+test('memory diagram sizes bars to fit and distinguishes idle KV from live KV', () => {
+  const one = R.renderMemoryDiagram(E.computeModelFootprint(Object.assign({}, BASE_FOR_DOM(), { tp: 1, weightPrecision: 'fp16', modelId: 'llama-3.1-8b', concurrentSeqs: 4 })));
+  assert.match(one, /all 1 GPU of one replica/);
+  assert.match(one, /fill="url\(#hatch-idle\)"/);
+  const widths = [...one.matchAll(/class="seg-weights" x="[0-9.]+" y="[0-9.]+" width="([0-9.]+)"/g)].map((m) => Number(m[1]));
+  assert.equal(widths.length, 1);
+  assert.equal(widths[0], 76);
+  const eight = R.renderMemoryDiagram(E.computeModelFootprint(Object.assign({}, SCN, { gpuId: 'h200', tp: 8 })));
+  const w8 = [...eight.matchAll(/class="seg-weights" x="[0-9.]+" y="[0-9.]+" width="([0-9.]+)"/g)].map((m) => Number(m[1]));
+  assert.equal(w8.length, 8);
+  assert.ok(w8[0] < 76 && w8[0] > 30);
+  assert.match(eight, /all 8 GPUs of one replica/);
+});
+
+function BASE_FOR_DOM() { return { gpuId: 'h100', pp: 1, kvPrecision: 'fp16', promptTokens: 2048, outputTokens: 256 }; }
+
+test('keyboard navigation of the export tabs wraps, jumps and keeps one tab stop', () => {
+  const { doc, app } = mountApp();
+  const key = (k) => doc.els['ex-tabs'].fire('keydown', { key: k, preventDefault() {} });
+  key('ArrowLeft');
+  assert.equal(app.state.exportTab, 'router');
+  assert.equal(doc.els['tab-router'].attrs.tabindex, '0');
+  assert.equal(doc.els['tab-compose'].attrs.tabindex, '-1');
+  key('Home');
+  assert.equal(app.state.exportTab, 'compose');
+  key('End');
+  assert.equal(app.state.exportTab, 'router');
+  key('ArrowRight');
+  assert.equal(app.state.exportTab, 'compose');
+  key('x');
+  assert.equal(app.state.exportTab, 'compose');
+});
+
+test('pool editor edits reset dependent fields and preserve typed costs', () => {
+  const { doc, app } = mountApp();
+  doc.getElementById('pool-3-model').value = 'llama-3.1-405b-fp8';
+  doc.els['r-pools'].fire('change');
+  assert.equal(app.state.pools[3].modelId, 'llama-3.1-405b-fp8');
+  assert.equal(app.state.pools[3].weightPrecision, 'fp8');
+  const price = E.GPUS.l40s.listPricePerGpuHour;
+  doc.els['r-pools'].innerHTML = R.renderPoolEditor(app.state.pools);
+  delete doc.els['pool-0-gpu']; delete doc.els['pool-0-cost']; delete doc.els['pool-0-model']; delete doc.els['pool-0-on'];
+  delete doc.els['pool-0-gpus']; delete doc.els['pool-0-tp']; delete doc.els['pool-0-prec'];
+  doc.getElementById('pool-0-cost').value = '9.99';
+  doc.els['r-pools'].fire('change');
+  assert.equal(app.state.pools[0].costPerGpuHour, 9.99);
+  doc.getElementById('pool-0-gpu').value = 'h100';
+  doc.els['r-pools'].fire('change');
+  assert.equal(app.state.pools[0].gpuId, 'h100');
+  assert.equal(app.state.pools[0].costPerGpuHour, E.GPUS.h100.listPricePerGpuHour);
+  assert.notEqual(price, E.GPUS.h100.listPricePerGpuHour);
+  doc.getElementById('pool-0-cost').value = '';
+  doc.els['r-pools'].fire('change');
+  assert.equal(app.state.pools[0].costPerGpuHour, null);
+});
+
+test('pointer movement over the charts maps to a burst index and a roofline intensity', () => {
+  const { doc, app } = mountApp();
+  const svg = (w) => ({ getBoundingClientRect: () => ({ left: 100, width: w }), getAttribute: () => '62,70,620,7' });
+  const x = 62 + (5 / 6) * (620 - 62 - 70);
+  doc.els['wb-ttft'].fire('pointermove', { clientX: 100 + x, target: { closest: () => svg(620) } });
+  assert.equal(app.state.ttftIndex, 5);
+  doc.els['wb-ttft'].fire('pointermove', { clientX: 100 + 62, target: { closest: () => svg(620) } });
+  assert.equal(app.state.ttftIndex, 0);
+  doc.els['wb-roofline'].fire('pointermove', { clientX: 100 + 310, target: { closest: () => svg(620) } });
+  assert.ok(app.state.hoverAi > 1);
+  assert.match(doc.els['wb-roofline'].innerHTML, /cross-line/);
+  doc.els['wb-roofline'].fire('pointerleave');
+  assert.equal(app.state.hoverAi, null);
+  doc.els['wb-roofline'].fire('pointermove', { clientX: 5, target: { closest: () => null } });
+  assert.equal(app.state.hoverAi, null);
+});
+
+test('preset chips mark only the selected preset as pressed', () => {
+  const { doc } = mountApp();
+  const chips = doc.els['preset-row'].innerHTML;
+  assert.equal((chips.match(/aria-pressed="true"/g) || []).length, 1);
+  assert.equal((chips.match(/aria-pressed="false"/g) || []).length, 3);
+});
+
+test('a live probe that cannot reach the endpoint reports a readable failure', async () => {
+  const { doc, app } = mountApp();
+  const saved = globalThis.fetch;
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  try {
+    doc.els['pr-model'].value = 'some/model';
+    doc.els['pr-key'].value = 'sk-should-not-leak';
+    await app.runProbe('live');
+    assert.match(doc.els['pr-result'].innerHTML, /Probe failed/);
+    assert.match(doc.els['pr-result'].innerHTML, /could not reach the endpoint/);
+    assert.equal(doc.els['pr-status'].textContent, 'The probe did not complete.');
+    assert.ok(!allHtml(doc).includes('sk-should-not-leak'));
+    await app.listModels();
+    assert.match(doc.els['pr-status'].textContent, /Could not list models/);
+  } finally {
+    globalThis.fetch = saved;
+  }
+});
+
+test('listing models fills the datalist with escaped ids', async () => {
+  const { doc, app } = mountApp();
+  const saved = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ data: [{ id: 'a/b' }, { id: '"><x' }] }) });
+  try {
+    await app.listModels();
+    assert.match(doc.els['pr-models'].innerHTML, /<option value="a\/b">/);
+    assert.ok(!doc.els['pr-models'].innerHTML.includes('"><x'));
+    assert.match(doc.els['pr-status'].textContent, /2 models returned/);
+  } finally {
+    globalThis.fetch = saved;
+  }
+});
+
+test('select options mark the current value as selected', () => {
+  const { doc } = mountApp();
+  assert.match(doc.els['f-model'].innerHTML, /<option value="llama-3\.1-70b" selected>/);
+  assert.equal((doc.els['f-model'].innerHTML.match(/ selected/g) || []).length, 1);
+  assert.match(doc.els['f-tp'].innerHTML, /<option value="4" selected>/);
 });

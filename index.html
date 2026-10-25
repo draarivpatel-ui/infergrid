@@ -364,7 +364,7 @@ all-reduce = latency + 2 (TP - 1) / TP x bytes / link</code></pre>
   <div class="panel">
     <h3 class="panel-title">GPU specifications</h3>
     <div id="m-hw" class="table-scroll" tabindex="0" role="region" aria-label="GPU specifications"></div>
-    <p class="fine">Throughput is dense Tensor Core throughput. NVIDIA prints a second, doubled figure with structured sparsity, which this engine ignores. Sources are the NVIDIA datacenter pages for <a href="https://www.nvidia.com/en-us/data-center/h200/">H200</a>, <a href="https://www.nvidia.com/en-us/data-center/l40s/">L40S</a> and <a href="https://www.nvidia.com/en-us/data-center/a100/">A100</a>, and the H100 datasheet, which shares the Hopper Tensor Core rates.</p>
+    <p class="fine">Throughput is dense Tensor Core throughput. The H100 and H200 pages print only the figures with structured sparsity (1,979 TFLOPS FP16 and 3,958 TFLOPS FP8), so the engine uses half of those. Sources are the NVIDIA datacenter pages for <a href="https://www.nvidia.com/en-us/data-center/h100/">H100</a>, <a href="https://www.nvidia.com/en-us/data-center/h200/">H200</a>, <a href="https://www.nvidia.com/en-us/data-center/l40s/">L40S</a> and <a href="https://www.nvidia.com/en-us/data-center/a100/">A100</a>.</p>
   </div>
 
   <div class="panel">

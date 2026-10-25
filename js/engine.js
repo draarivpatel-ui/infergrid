@@ -55,7 +55,7 @@
       tflops: { fp16: 989, fp8: 1979, int8: 1979 },
       link: { kind: 'nvlink', gbsPerDir: 450, latencyUs: 12 }, nodeSize: 8,
       listPricePerGpuHour: 4.5, priceSource: 'nebius.com/prices on 2026-10-25',
-      datasheet: 'NVIDIA H100 datasheet, dense Tensor Core throughput'
+      datasheet: 'NVIDIA H100 page lists 1,979 TFLOPS FP16 and 3,958 FP8 with sparsity, so dense is half'
     },
     h200: {
       id: 'h200', name: 'H200 SXM 141GB', short: 'H200', memGiB: 141, bwGBs: 4800, memType: 'HBM3e',
