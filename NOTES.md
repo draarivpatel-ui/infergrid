@@ -195,4 +195,8 @@ files must be checked against your vLLM or TensorRT-LLM version before productio
 
 ## Deployment
 
-Pushed to GitHub and Pages enabled in the final step of the session. The result is recorded below once the first build is verified.
+Public repository `https://github.com/draarivpatel-ui/infergrid` (checked with `git remote -v`),
+GitHub Pages on `main` at `/`. On 2026-10-25 at 17:42 UTC, after the first build finished,
+`curl -sI https://aariv.me/infergrid/` returned `HTTP/2 200`, and `img/og.png`, `js/engine.js`,
+`js/render.js`, `js/app.js` and `styles.css` each returned 200. The live page was not re-driven in
+a browser after deploy, only the same files were exercised locally.
