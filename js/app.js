@@ -142,7 +142,7 @@
       renderOutputs();
       setHtml('wb-verdict', R.renderVerdict(fp, metrics));
       setHtml('live-bar', R.renderLiveBar(fp, metrics));
-      setHtml('wb-memory', R.renderMemoryDiagram(fp));
+      setHtml('wb-memory', R.renderMemoryDiagram(fp, isNarrow()));
       setHtml('wb-legend', R.renderMemoryLegend(fp));
       renderRoofline();
       renderTtft();
@@ -484,6 +484,7 @@
       win.addEventListener('resize', function () {
         if (isNarrow() === wasNarrow) return;
         wasNarrow = isNarrow();
+        if (state.last.fp) setHtml('wb-memory', R.renderMemoryDiagram(state.last.fp, wasNarrow));
         renderRoofline();
         renderTtft();
       });

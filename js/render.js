@@ -45,6 +45,9 @@
     { key: 'reserve', label: 'Left unclaimed by utilization cap', cls: 'seg-reserve' }
   ];
 
+  /* phone charts are drawn this wide; a 309px column then shows 12 unit text at about 11px */
+  const NARROW_W = 330;
+
   function stackModel(fp) {
     const b = fp.bytes;
     const fixed = b.weights + b.activation + b.runtime;
@@ -58,9 +61,10 @@
     return { values: values, unmet: unmet, top: top, fixed: fixed };
   }
 
-  function renderMemoryDiagram(fp) {
+  /* narrow draws a 330 unit box so its 12 unit text lands near 11px on a phone */
+  function renderMemoryDiagram(fp, narrow) {
     const n = Math.min(fp.gpusPerReplica, 8);
-    const W = 440, H = 340, left = 40, right = 10, topPad = 30, bottomPad = 50;
+    const W = narrow ? NARROW_W : 440, H = 340, left = 40, right = 10, topPad = 30, bottomPad = 50;
     const barAreaH = H - topPad - bottomPad;
     const gap = 8;
     const avail = W - left - right;
@@ -99,7 +103,7 @@
         const y = yOf(cursor + m.unmet);
         out += '<rect class="seg-over" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + (m.unmet * k).toFixed(1) + '" fill="url(#hatch-over)"/>';
       }
-      out += '<text class="axis-text" x="' + (x + barW / 2).toFixed(1) + '" y="' + (H - 28) + '" text-anchor="middle">GPU ' + i + '</text>';
+      out += '<text class="axis-text" x="' + (x + barW / 2).toFixed(1) + '" y="' + (H - 28) + '" text-anchor="middle">' + (narrow && n >= 6 ? i : 'GPU ' + i) + '</text>';
     }
     const capY = yOf(fp.bytes.capacity);
     const budY = yOf(fp.bytes.budget);
@@ -107,7 +111,9 @@
     out += '<line class="budget-line" x1="' + left + '" x2="' + (W - right) + '" y1="' + budY.toFixed(1) + '" y2="' + budY.toFixed(1) + '"/>';
     out += '<text class="annot-text" x="' + (W - right) + '" y="' + (capY - 5).toFixed(1) + '" text-anchor="end">HBM capacity ' + num(fp.bytes.capacity / GIB, 0) + ' GiB</text>';
     if (Math.abs(capY - budY) > 14) out += '<text class="annot-text" x="' + (W - right) + '" y="' + (budY - 5).toFixed(1) + '" text-anchor="end">budget ' + num(fp.bytes.budget / GIB, 1) + ' GiB</text>';
-    const more = fp.gpusPerReplica > 8 ? ' (first 8 of ' + fp.gpusPerReplica + ' identical GPUs shown)' : ' (all ' + n + ' GPU' + (n === 1 ? '' : 's') + ' of one replica are identical)';
+    const more = narrow
+      ? (fp.gpusPerReplica > 8 ? ', first 8 of ' + fp.gpusPerReplica + ' identical GPUs' : n === 1 ? ', one GPU' : ', all ' + n + ' GPUs identical')
+      : fp.gpusPerReplica > 8 ? ' (first 8 of ' + fp.gpusPerReplica + ' identical GPUs shown)' : ' (all ' + n + ' GPU' + (n === 1 ? '' : 's') + ' of one replica are identical)';
     out += '<text class="axis-text" x="' + (W / 2) + '" y="' + (H - 8) + '" text-anchor="middle">' + esc('TP ' + fp.cfg.tp + ' x PP ' + fp.cfg.pp + more) + '</text>';
     out += '</svg>';
     return out;
@@ -214,9 +220,7 @@
   function rfX(ai) { return RF.L + (Math.log10(ai) - RF.xMin) / (RF.xMax - RF.xMin) * (RF.W - RF.L - RF.R); }
   function rfY(tf) { return RF.T + (1 - (Math.log10(tf) - RF.yMin) / (RF.yMax - RF.yMin)) * (RF.H - RF.T - RF.B); }
 
-  const NARROW_W = 400;
-
-  /* narrow draws the same chart in a 400 unit box so phone text stays near 10px */
+  /* narrow draws the same chart in a NARROW_W unit box so phone text stays near 11px */
   function renderRoofline(metrics, hoverAi, narrow) {
     RF.W = narrow ? NARROW_W : 620;
     const cfg = metrics.cfg;
@@ -231,7 +235,7 @@
       const x = rfX(t);
       out += '<line class="grid-line" x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="' + RF.T + '" y2="' + (RF.H - RF.B) + '"/><text class="axis-text" x="' + x.toFixed(1) + '" y="' + (RF.H - RF.B + 16) + '" text-anchor="middle">' + t + '</text>';
     });
-    out += '<text class="axis-text" x="' + ((RF.L + RF.W - RF.R) / 2) + '" y="' + (RF.H - 10) + '" text-anchor="middle">Arithmetic intensity (FLOP per byte moved)</text>';
+    out += '<text class="axis-text" x="' + ((RF.L + RF.W - RF.R) / 2) + '" y="' + (RF.H - 10) + '" text-anchor="middle">' + (narrow ? 'Arithmetic intensity, FLOP per byte' : 'Arithmetic intensity (FLOP per byte moved)') + '</text>';
     out += '<text class="axis-text" x="12" y="' + (RF.T + 8) + '">TFLOPS</text>';
 
     out += '<defs><clipPath id="rf-plot-clip"><rect x="' + RF.L + '" y="' + RF.T + '" width="' + (RF.W - RF.L - RF.R) + '" height="' + (RF.H - RF.T - RF.B) + '"/></clipPath></defs>';
@@ -252,22 +256,51 @@
       const lx = rfX(Math.pow(10, RF.xMax)) - 4;
       labels.push('<text class="rf-label rf-text-' + gid + (active ? ' is-active' : '') + '" x="' + lx.toFixed(1) + '" y="' + (rfY(c.peakTflops) - 5 - stack * 13).toFixed(1) + '" text-anchor="end">' + esc(E.GPUS[gid].short) + '</text>');
     });
-    out += '</g>' + labels.join('');
+    out += '</g>';
+    const beforeLabels = out.length;
+    out += labels.join('');
 
     const dots = [
       { key: 'decode1', ai: Math.max(0.5, metrics.decodeSingle.intensity), tf: Math.max(1.05, metrics.decodeSingle.achievedTflops), label: 'Decode, 1 sequence', cls: 'dot-decode1' },
-      { key: 'decode', ai: Math.max(0.5, metrics.decode.intensity), tf: Math.max(1.05, metrics.decode.achievedTflops), label: 'Decode, ' + cfg.concurrentSeqs + ' sequences', cls: 'dot-decode' },
+      { key: 'decode', ai: Math.max(0.5, metrics.decode.intensity), tf: Math.max(1.05, metrics.decode.achievedTflops), label: 'Decode, ' + cfg.concurrentSeqs + (cfg.concurrentSeqs === 1 ? ' sequence' : ' sequences'), cls: 'dot-decode' },
       { key: 'prefill', ai: Math.max(0.5, metrics.prefill.intensity), tf: Math.max(1.05, metrics.prefill.achievedTflops), label: 'Prefill, ' + num(cfg.promptTokens) + ' tokens', cls: 'dot-prefill' }
     ];
+    const hovering = hoverAi && hoverAi > 0;
     dots.forEach(function (d, i) {
       const x = rfX(Math.min(d.ai, Math.pow(10, RF.xMax))), y = rfY(d.tf);
       const anchor = x > RF.W - 170 ? 'end' : 'start';
       const dx = anchor === 'end' ? -10 : 10;
       out += '<circle class="rf-dot ' + d.cls + '" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="6"><title>' + esc(d.label + ', ' + num(d.ai, 1) + ' FLOP/B, ' + num(d.tf, 1) + ' TFLOPS') + '</title></circle>';
-      out += '<text class="rf-dot-label" x="' + (x + dx).toFixed(1) + '" y="' + (y + (d.key === 'prefill' ? 20 : 4 + (i === 0 ? 14 : 0))).toFixed(1) + '" text-anchor="' + anchor + '">' + esc(d.label) + '</text>';
+      if (narrow && d.key === 'prefill' && y < rfY(100)) {
+        /* near the ceilings the label would sit on the roof and the GPU names, so it goes above them;
+           the crosshair readout uses that band while a finger is on the chart */
+        if (hovering) return;
+        const ly = RF.T + 12;
+        /* the leader goes under the GPU names so their halo masks it where it passes behind them */
+        const leader = '<line class="rf-leader" x1="' + x.toFixed(1) + '" y1="' + (y - 7).toFixed(1) + '" x2="' + x.toFixed(1) + '" y2="' + (ly + 4) + '"/>';
+        out = out.slice(0, beforeLabels) + leader + out.slice(beforeLabels);
+        out += '<text class="rf-dot-label" x="' + (x - 6).toFixed(1) + '" y="' + ly + '" text-anchor="end">' + esc(d.label) + '</text>';
+        return;
+      }
+      const ty = y + (d.key === 'prefill' ? 20 : 4 + (i === 0 ? 14 : 0));
+      if (narrow && d.key !== 'prefill') {
+        /* about 6.6 units per character at 12 units; flipping left would put the label on the roof line,
+           so a label that is too long for the right side wraps onto two lines there instead */
+        const room = RF.W - 4 - (x + 10);
+        const parts = d.label.split(', ');
+        if (d.label.length * 6.6 <= room) {
+          out += '<text class="rf-dot-label" x="' + (x + 10).toFixed(1) + '" y="' + ty.toFixed(1) + '">' + esc(d.label) + '</text>';
+          return;
+        }
+        if (parts.length === 2 && Math.max(parts[0].length, parts[1].length) * 6.6 <= room) {
+          out += '<text class="rf-dot-label" x="' + (x + 10).toFixed(1) + '" y="' + ty.toFixed(1) + '">' + esc(parts[0] + ',') + '<tspan x="' + (x + 10).toFixed(1) + '" dy="14">' + esc(parts[1]) + '</tspan></text>';
+          return;
+        }
+      }
+      out += '<text class="rf-dot-label" x="' + (x + dx).toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="' + anchor + '">' + esc(d.label) + '</text>';
     });
 
-    if (hoverAi && hoverAi > 0) {
+    if (hovering) {
       const c = E.rooflineCurve(cfg.gpuId, cfg.weightPrecision, cfg.efficiency);
       const att = Math.min(c.peakTflops, hoverAi * c.bandwidthTBs);
       const x = rfX(hoverAi), y = rfY(att);
@@ -293,6 +326,7 @@
 
   function renderTtftChart(series, selected, sloMs, narrow) {
     TT.W = narrow ? NARROW_W : 620;
+    TT.L = narrow ? 66 : 62;
     const all = [];
     series.forEach(function (s) { s.points.forEach(function (p) { all.push(p.ttftMs); }); });
     const lo = Math.pow(10, Math.floor(Math.log10(Math.max(1, Math.min.apply(null, all)))));
@@ -471,7 +505,7 @@
   }
 
   return {
-    esc: esc, num: num, msStr: msStr, gibStr: gibStr, pct: pct, BATCHES: BATCHES, SEGMENTS: SEGMENTS, ICONS: ICONS,
+    esc: esc, num: num, msStr: msStr, gibStr: gibStr, pct: pct, BATCHES: BATCHES, NARROW_W: NARROW_W, SEGMENTS: SEGMENTS, ICONS: ICONS,
     renderMemoryDiagram: renderMemoryDiagram, renderMemoryLegend: renderMemoryLegend, renderHeroBar: renderHeroBar,
     renderVerdict: renderVerdict, renderLiveBar: renderLiveBar, renderNumbersTable: renderNumbersTable, renderSteps: renderSteps,
     renderRoofline: renderRoofline, rooflineAiFromX: rooflineAiFromX,

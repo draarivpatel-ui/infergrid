@@ -117,10 +117,16 @@ test('page has a noscript fallback that explains the page', () => {
   assert.match(m[1], /327,680/);
 });
 
-test('fonts are loaded with preconnect and display swap', () => {
-  assert.match(html, /rel="preconnect" href="https:\/\/fonts\.googleapis\.com"/);
-  assert.match(html, /display=swap/);
-  ['Space+Grotesk', 'Plus+Jakarta+Sans', 'JetBrains+Mono'].forEach((f) => assert.ok(html.includes(f), f));
+test('fonts are self hosted with display swap and no font service request', () => {
+  assert.doesNotMatch(html, /fonts\.(googleapis|gstatic)\.com/);
+  assert.match(html, /<link rel="stylesheet" href="fonts\.css">/);
+  const fontCss = fs.readFileSync(path.join(ROOT, 'fonts.css'), 'utf8');
+  assert.doesNotMatch(fontCss, /https?:\/\//);
+  assert.match(fontCss, /font-display: swap/);
+  ['Space Grotesk', 'Plus Jakarta Sans', 'JetBrains Mono'].forEach((f) => assert.ok(fontCss.includes(`"${f}"`), f));
+  for (const m of fontCss.matchAll(/url\("(fonts\/[^"]+)"\)/g)) {
+    assert.ok(fs.existsSync(path.join(ROOT, m[1])), m[1]);
+  }
 });
 
 test('there is one h1, a main landmark, a skip link and labelled navigation', () => {
@@ -765,12 +771,12 @@ test('roofline curves are clipped to the plot so no ceiling line spills below th
 
 test('narrow charts redraw in a smaller box and keep the pointer maths in step', () => {
   const m = E.computeRooflineMetrics(SCN);
-  assert.match(R.renderRoofline(m, null, true), /viewBox="0 0 400 380"/);
+  assert.match(R.renderRoofline(m, null, true), new RegExp('viewBox="0 0 ' + R.NARROW_W + ' 380"'));
   const narrowAi = R.rooflineAiFromX(200);
   assert.match(R.renderRoofline(m, null), /viewBox="0 0 620 380"/);
   assert.ok(R.rooflineAiFromX(200) < narrowAi, 'the same x lands lower on the wide chart');
   const series = E.ttftVsBatch(SCN, ['h100', 'h200', 'l40s', 'a100'], R.BATCHES);
-  assert.match(R.renderTtftChart(series, 3, 6000, true), /viewBox="0 0 400 380"/);
+  assert.match(R.renderTtftChart(series, 3, 6000, true), new RegExp('viewBox="0 0 ' + R.NARROW_W + ' 380"'));
   assert.match(R.renderTtftChart(series, 3, 6000), /viewBox="0 0 620 380"/);
 });
 
@@ -786,4 +792,51 @@ test('the live bar names the verdict and the numbers that matter', () => {
   const bad = R.renderLiveBar(E.computeModelFootprint(badCfg), E.computeRooflineMetrics(badCfg));
   assert.match(bad, /Invalid layout/);
   assert.doesNotMatch(bad, /TTFT/);
+});
+
+test('phone charts are drawn narrow enough for 12 unit text to read near 11px', () => {
+  const W = R.NARROW_W;
+  // 309px is the chart column on a 375px phone; 12 unit labels must land at 11px or more
+  assert.ok((12 * 309) / W >= 11, 'narrow width ' + W);
+  const fp = E.computeModelFootprint(SCN);
+  const mem = R.renderMemoryDiagram(fp, true);
+  assert.match(mem, new RegExp('viewBox="0 0 ' + W + ' '));
+  assert.match(mem, /TP 4 x PP 1, all 4 GPUs identical/);
+  assert.match(mem, />GPU 3</);
+  const eight = R.renderMemoryDiagram(E.computeModelFootprint(Object.assign({}, SCN, { gpuId: 'h200', tp: 8 })), true);
+  assert.doesNotMatch(eight, />GPU \d</, 'eight bars use bare indexes so labels do not collide');
+  assert.match(eight, />7</);
+  assert.match(R.renderMemoryDiagram(fp), /viewBox="0 0 440 /);
+  const m = E.computeRooflineMetrics(SCN);
+  assert.match(R.renderRoofline(m, null, true), new RegExp('viewBox="0 0 ' + W + ' '));
+  assert.match(R.renderTtftChart(E.ttftVsBatch(SCN, ['h100', 'h200', 'l40s', 'a100'], R.BATCHES), 3, 500, true), new RegExp('viewBox="0 0 ' + W + ' '));
+  assert.match(css, /\.chart-memory \.axis-text, \.chart-memory \.annot-text \{ font-size: 12px; \}/);
+});
+
+test('on phones the prefill label sits above the ceilings, clear of the roof line and GPU names', () => {
+  const m = E.computeRooflineMetrics(SCN);
+  const svg = R.renderRoofline(m, null, true);
+  const label = svg.match(/<text class="rf-dot-label" x="([0-9.]+)" y="([0-9.]+)" text-anchor="end">Prefill, 4,000 tokens<\/text>/);
+  assert.ok(label, 'prefill label present and right aligned');
+  const ceilingYs = [...svg.matchAll(/<text class="rf-label[^"]*" x="[0-9.]+" y="([0-9.]+)"/g)].map((x) => Number(x[1]));
+  // label baseline is a full text line above the highest GPU name
+  assert.ok(Number(label[2]) + 12 <= Math.min(...ceilingYs), 'label ' + label[2] + ' vs ceilings ' + ceilingYs);
+  assert.match(svg, /class="rf-leader"/);
+  // while the crosshair readout uses the top band the label steps aside; the dot keeps its title
+  const hover = R.renderRoofline(m, 120, true);
+  assert.doesNotMatch(hover, />Prefill, 4,000 tokens<\/text>/);
+  assert.match(hover, /<title>Prefill, 4,000 tokens/);
+  // desktop keeps the original placement
+  assert.doesNotMatch(R.renderRoofline(m, null), /rf-leader/);
+});
+
+test('on phones decode labels stay right of their dots, off the roof line', () => {
+  [1, 8, 32, 128].forEach((seqs) => {
+    const svg = R.renderRoofline(E.computeRooflineMetrics(Object.assign({}, SCN, { concurrentSeqs: seqs })), null, true);
+    for (const m of svg.matchAll(/<circle class="rf-dot dot-decode1?" cx="([0-9.]+)"[^]*?<text class="rf-dot-label" x="([0-9.]+)"([^>]*)>/g)) {
+      if (/text-anchor="end"/.test(m[3])) continue; // only when neither one nor two lines fit on the right
+      assert.ok(Number(m[2]) > Number(m[1]), 'seqs ' + seqs + ': label starts right of its dot');
+    }
+    assert.doesNotMatch(svg, /Decode[^<]*<\/text>[^]*text-anchor="end">Decode/);
+  });
 });

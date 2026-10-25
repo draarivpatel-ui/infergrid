@@ -223,6 +223,9 @@ input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--color-si
 .cross-line { stroke: var(--color-ink-2); stroke-width: 1; stroke-dasharray: 3 3; }
 .cross-dot { fill: var(--color-ink); }
 .cross-text { font: 500 11px var(--font-mono); fill: var(--color-ink); }
+.rf-leader { stroke: var(--color-ink-3); stroke-width: 1; stroke-dasharray: 2 2; }
+/* a halo in the panel colour keeps labels readable where they cross plot lines */
+.chart .annot-text, .chart .rf-dot-label, .chart .cross-text, .chart .rf-label { paint-order: stroke; stroke: var(--color-paper-2); stroke-width: 3.5px; stroke-linejoin: round; }
 .tt-line { fill: none; stroke-width: 2.4; }
 .tt-h200 { stroke-width: 6; }
 .tt-line.is-nofit { stroke-dasharray: 6 5; opacity: 0.7; }
@@ -365,7 +368,7 @@ pre.code.small { border: var(--rule) solid var(--color-line); border-radius: var
   section.wrap { padding-block: var(--space-6); }
 }
 @media (max-width: 620px) {
-  .chart-roofline .axis-text, .chart-roofline .rf-label, .chart-roofline .rf-dot-label, .chart-roofline .cross-text, .chart-ttft .axis-text, .chart-ttft .cross-text, .chart-ttft .annot-text { font-size: 12px; }
+  .chart-roofline .axis-text, .chart-roofline .rf-label, .chart-roofline .rf-dot-label, .chart-roofline .cross-text, .chart-ttft .axis-text, .chart-ttft .cross-text, .chart-ttft .annot-text, .chart-memory .axis-text, .chart-memory .annot-text { font-size: 12px; }
   .chart-ttft .tt-label { font-size: 13px; }
 }
 @media (max-width: 420px) {
