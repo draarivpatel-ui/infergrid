@@ -50,6 +50,7 @@
       last: {}
     };
 
+    function isNarrow() { return !!(win && win.innerWidth && win.innerWidth <= 620); }
     function setHtml(id, html) { const el = $(id); if (el) el.innerHTML = html; }
     function setText(id, text) { const el = $(id); if (el) el.textContent = text; }
     function options(list, selected) {
@@ -140,6 +141,7 @@
       state.last.fp = fp; state.last.metrics = metrics; state.last.series = series;
       renderOutputs();
       setHtml('wb-verdict', R.renderVerdict(fp, metrics));
+      setHtml('live-bar', R.renderLiveBar(fp, metrics));
       setHtml('wb-memory', R.renderMemoryDiagram(fp));
       setHtml('wb-legend', R.renderMemoryLegend(fp));
       renderRoofline();
@@ -150,16 +152,32 @@
       renderExport();
     }
 
+    /* The live bar shows the verdict while the controls are on screen and the full verdict card is not. */
+    function watchLiveBar() {
+      const bar = $('live-bar'), section = $('workbench'), card = $('wb-verdict');
+      if (!bar || !section || !card || !win || typeof win.IntersectionObserver !== 'function') return;
+      const seen = { section: false, card: false };
+      const apply = function () { bar.setAttribute('data-visible', seen.section && !seen.card ? 'true' : 'false'); };
+      const watch = function (el, key) {
+        new win.IntersectionObserver(function (entries) {
+          entries.forEach(function (e) { seen[key] = e.isIntersecting; });
+          apply();
+        }).observe(el);
+      };
+      watch(section, 'section');
+      watch(card, 'card');
+    }
+
     function renderRoofline() {
       const m = state.last.metrics;
-      setHtml('wb-roofline', R.renderRoofline(m, state.hoverAi));
+      setHtml('wb-roofline', R.renderRoofline(m, state.hoverAi, isNarrow()));
       const dBound = m.decode.intensity < m.ridge ? 'below' : 'above';
       setText('rf-note', 'Decode lands at ' + R.num(m.decode.intensity, 1) + ' FLOP per byte, ' + dBound + ' the ridge point of ' + R.num(m.ridge, 0) + ', so it is ' + m.decode.boundBy + ' bound. Prefill lands at ' + R.num(m.prefill.intensity, 0) + ' FLOP per byte and is ' + m.prefill.boundBy + ' bound.');
     }
 
     function renderTtft() {
       const series = state.last.series;
-      setHtml('wb-ttft', R.renderTtftChart(series, state.ttftIndex, state.router.sloTtftMs));
+      setHtml('wb-ttft', R.renderTtftChart(series, state.ttftIndex, state.router.sloTtftMs, isNarrow()));
       setHtml('wb-ttft-readout', R.renderTtftReadout(series, state.ttftIndex));
       setText('o-ttft-inspect', 'Burst of ' + R.BATCHES[state.ttftIndex]);
       const el = $('f-ttft-inspect');
@@ -460,6 +478,16 @@
     bind();
     recomputeScenario();
     recomputeRouter();
+    watchLiveBar();
+    if (win && typeof win.addEventListener === 'function') {
+      let wasNarrow = isNarrow();
+      win.addEventListener('resize', function () {
+        if (isNarrow() === wasNarrow) return;
+        wasNarrow = isNarrow();
+        renderRoofline();
+        renderTtft();
+      });
+    }
 
     return {
       state: state, applyPreset: applyPreset, recomputeScenario: recomputeScenario, recomputeRouter: recomputeRouter,

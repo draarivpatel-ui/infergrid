@@ -756,3 +756,34 @@ test('select options mark the current value as selected', () => {
   assert.equal((doc.els['f-model'].innerHTML.match(/ selected/g) || []).length, 1);
   assert.match(doc.els['f-tp'].innerHTML, /<option value="4" selected>/);
 });
+
+test('roofline curves are clipped to the plot so no ceiling line spills below the axis', () => {
+  const svg = R.renderRoofline(E.computeRooflineMetrics(SCN), null);
+  assert.match(svg, /<clipPath id="rf-plot-clip">/);
+  assert.match(svg, /<g clip-path="url\(#rf-plot-clip\)">(?:(?!<\/g>)[^])*rf-curve rf-l40s/);
+});
+
+test('narrow charts redraw in a smaller box and keep the pointer maths in step', () => {
+  const m = E.computeRooflineMetrics(SCN);
+  assert.match(R.renderRoofline(m, null, true), /viewBox="0 0 400 380"/);
+  const narrowAi = R.rooflineAiFromX(200);
+  assert.match(R.renderRoofline(m, null), /viewBox="0 0 620 380"/);
+  assert.ok(R.rooflineAiFromX(200) < narrowAi, 'the same x lands lower on the wide chart');
+  const series = E.ttftVsBatch(SCN, ['h100', 'h200', 'l40s', 'a100'], R.BATCHES);
+  assert.match(R.renderTtftChart(series, 3, 6000, true), /viewBox="0 0 400 380"/);
+  assert.match(R.renderTtftChart(series, 3, 6000), /viewBox="0 0 620 380"/);
+});
+
+test('the live bar names the verdict and the numbers that matter', () => {
+  const fp = E.computeModelFootprint(SCN);
+  const bar = R.renderLiveBar(fp, E.computeRooflineMetrics(SCN));
+  assert.match(bar, /live-ok/);
+  assert.match(bar, /TTFT [\d,.]+ (ms|s)/);
+  const oomCfg = Object.assign({}, SCN, { concurrentSeqs: 5000 });
+  const oom = R.renderLiveBar(E.computeModelFootprint(oomCfg), E.computeRooflineMetrics(oomCfg));
+  assert.match(oom, /live-bad[^]*Out of memory/);
+  const badCfg = Object.assign({}, SCN, { tp: 3 });
+  const bad = R.renderLiveBar(E.computeModelFootprint(badCfg), E.computeRooflineMetrics(badCfg));
+  assert.match(bad, /Invalid layout/);
+  assert.doesNotMatch(bad, /TTFT/);
+});

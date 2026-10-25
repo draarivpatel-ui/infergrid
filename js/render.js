@@ -168,6 +168,16 @@
     return out;
   }
 
+  function renderLiveBar(fp, metrics) {
+    const cls = fp.verdict === 'fits' ? 'ok' : fp.verdict === 'tight' ? 'warn' : 'bad';
+    const word = { fits: 'Fits', tight: 'Fits, but tight', oom: 'Out of memory', invalid: 'Invalid layout' }[fp.verdict];
+    let out = '<a class="live-pill live-' + cls + '" href="#wb-verdict"><strong class="live-word">' + esc(word) + '</strong>';
+    if (metrics && fp.ok) {
+      out += '<span class="live-stat num">TTFT ' + msStr(metrics.prefill.ttftMs) + '</span><span class="live-stat num">ITL ' + msStr(metrics.decode.itlMs) + '</span><span class="live-stat num">Free ' + gibStr(fp.bytes.headroom, 1) + '</span>';
+    }
+    return out + '</a>';
+  }
+
   function renderNumbersTable(fp, metrics) {
     const rows = [
       ['KV cache per token', num(fp.kv.bytesPerToken) + ' B', 'whole model, all layers'],
@@ -204,7 +214,11 @@
   function rfX(ai) { return RF.L + (Math.log10(ai) - RF.xMin) / (RF.xMax - RF.xMin) * (RF.W - RF.L - RF.R); }
   function rfY(tf) { return RF.T + (1 - (Math.log10(tf) - RF.yMin) / (RF.yMax - RF.yMin)) * (RF.H - RF.T - RF.B); }
 
-  function renderRoofline(metrics, hoverAi) {
+  const NARROW_W = 400;
+
+  /* narrow draws the same chart in a 400 unit box so phone text stays near 10px */
+  function renderRoofline(metrics, hoverAi, narrow) {
+    RF.W = narrow ? NARROW_W : 620;
     const cfg = metrics.cfg;
     let out = '<svg class="chart chart-roofline" viewBox="0 0 ' + RF.W + ' ' + RF.H + '" role="img" aria-labelledby="rf-title rf-desc" data-plot="' + [RF.L, RF.R, RF.W, RF.xMin, RF.xMax].join(',') + '">';
     out += '<title id="rf-title">Roofline chart</title>';
@@ -220,7 +234,10 @@
     out += '<text class="axis-text" x="' + ((RF.L + RF.W - RF.R) / 2) + '" y="' + (RF.H - 10) + '" text-anchor="middle">Arithmetic intensity (FLOP per byte moved)</text>';
     out += '<text class="axis-text" x="12" y="' + (RF.T + 8) + '">TFLOPS</text>';
 
+    out += '<defs><clipPath id="rf-plot-clip"><rect x="' + RF.L + '" y="' + RF.T + '" width="' + (RF.W - RF.L - RF.R) + '" height="' + (RF.H - RF.T - RF.B) + '"/></clipPath></defs>';
+    out += '<g clip-path="url(#rf-plot-clip)">';
     const seenPeaks = {};
+    const labels = [];
     E.GPU_IDS.forEach(function (gid) {
       const c = E.rooflineCurve(gid, cfg.weightPrecision, cfg.efficiency);
       const peakKey = c.peakTflops.toFixed(3);
@@ -233,8 +250,9 @@
       const active = gid === cfg.gpuId;
       out += '<path class="rf-curve rf-' + gid + (active ? ' is-active' : '') + '" d="' + d + '"/>';
       const lx = rfX(Math.pow(10, RF.xMax)) - 4;
-      out += '<text class="rf-label rf-text-' + gid + (active ? ' is-active' : '') + '" x="' + lx.toFixed(1) + '" y="' + (rfY(c.peakTflops) - 5 - stack * 13).toFixed(1) + '" text-anchor="end">' + esc(E.GPUS[gid].short) + '</text>';
+      labels.push('<text class="rf-label rf-text-' + gid + (active ? ' is-active' : '') + '" x="' + lx.toFixed(1) + '" y="' + (rfY(c.peakTflops) - 5 - stack * 13).toFixed(1) + '" text-anchor="end">' + esc(E.GPUS[gid].short) + '</text>');
     });
+    out += '</g>' + labels.join('');
 
     const dots = [
       { key: 'decode1', ai: Math.max(0.5, metrics.decodeSingle.intensity), tf: Math.max(1.05, metrics.decodeSingle.achievedTflops), label: 'Decode, 1 sequence', cls: 'dot-decode1' },
@@ -273,7 +291,8 @@
   const TT = { W: 620, H: 380, L: 62, R: 70, T: 18, B: 52 };
   const BATCHES = [1, 2, 4, 8, 16, 32, 64];
 
-  function renderTtftChart(series, selected, sloMs) {
+  function renderTtftChart(series, selected, sloMs, narrow) {
+    TT.W = narrow ? NARROW_W : 620;
     const all = [];
     series.forEach(function (s) { s.points.forEach(function (p) { all.push(p.ttftMs); }); });
     const lo = Math.pow(10, Math.floor(Math.log10(Math.max(1, Math.min.apply(null, all)))));
@@ -291,7 +310,7 @@
     BATCHES.forEach(function (b, i) {
       out += '<text class="axis-text" x="' + x(i).toFixed(1) + '" y="' + (TT.H - TT.B + 16) + '" text-anchor="middle">' + b + '</text>';
     });
-    out += '<text class="axis-text" x="' + ((TT.L + TT.W - TT.R) / 2) + '" y="' + (TT.H - 10) + '" text-anchor="middle">Prompts arriving together (TTFT shown is the last one served)</text>';
+    out += '<text class="axis-text" x="' + ((TT.L + TT.W - TT.R) / 2) + '" y="' + (TT.H - 10) + '" text-anchor="middle">' + (narrow ? 'Burst size, last prompt served' : 'Prompts arriving together (TTFT shown is the last one served)') + '</text>';
     if (sloMs && sloMs >= lo && sloMs <= hi) {
       out += '<line class="slo-line" x1="' + TT.L + '" x2="' + (TT.W - TT.R) + '" y1="' + y(sloMs).toFixed(1) + '" y2="' + y(sloMs).toFixed(1) + '"/><text class="annot-text" x="' + (TT.L + 4) + '" y="' + (y(sloMs) - 5).toFixed(1) + '">TTFT target ' + msStr(sloMs) + '</text>';
     }
@@ -454,7 +473,7 @@
   return {
     esc: esc, num: num, msStr: msStr, gibStr: gibStr, pct: pct, BATCHES: BATCHES, SEGMENTS: SEGMENTS, ICONS: ICONS,
     renderMemoryDiagram: renderMemoryDiagram, renderMemoryLegend: renderMemoryLegend, renderHeroBar: renderHeroBar,
-    renderVerdict: renderVerdict, renderNumbersTable: renderNumbersTable, renderSteps: renderSteps,
+    renderVerdict: renderVerdict, renderLiveBar: renderLiveBar, renderNumbersTable: renderNumbersTable, renderSteps: renderSteps,
     renderRoofline: renderRoofline, rooflineAiFromX: rooflineAiFromX,
     renderTtftChart: renderTtftChart, ttftIndexFromX: ttftIndexFromX, renderTtftReadout: renderTtftReadout,
     renderPoolEditor: renderPoolEditor, renderRouterSummary: renderRouterSummary, renderPolicyTable: renderPolicyTable,
