@@ -4,7 +4,7 @@
   "private": true,
   "description": "Open weight LLM capacity planner, KV cache calculator and multi GPU routing workbench. Static page, zero dependencies.",
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test"
   },
   "author": "Aariv Patel",
   "license": "MIT"
